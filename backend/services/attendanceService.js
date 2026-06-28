@@ -6,9 +6,6 @@ const { computeMetrics } = require("../utils/attendanceCalculator");
 // ── Helpers
 // ══════════════════════════════════════════════
 
-/**
- * Returns today's date as "YYYY-MM-DD" in local time.
- */
 function getTodayDate() {
     const now = new Date();
     const year = now.getFullYear();
@@ -17,9 +14,6 @@ function getTodayDate() {
     return `${year}-${month}-${day}`;
 }
 
-/**
- * Returns the current time as "HH:MM" in local time.
- */
 function getCurrentTimeString() {
     const now = new Date();
     const hours = String(now.getHours()).padStart(2, "0");
@@ -27,11 +21,6 @@ function getCurrentTimeString() {
     return `${hours}:${minutes}`;
 }
 
-/**
- * Finds the user's active schedule that covers today's date.
- * Queries all schedules for the user and filters in-code
- * (Firestore doesn't support inequality filters on multiple fields).
- */
 async function getActiveSchedule(userId) {
     const today = getTodayDate();
     const snap = await db
@@ -46,6 +35,37 @@ async function getActiveSchedule(userId) {
     return schedule || null;
 }
 
+/**
+ * Adjusts the computed attendance metrics based on shift type rule:
+ * - Morning/Afternoon shifts -> recorded as regular hours.
+ * - Night shifts -> all basic hours shift to night differential.
+ */
+function applyShiftAllocation(metrics, shiftType, scheduleStart, scheduleEnd) {
+    const adjusted = { ...metrics };
+    let shift = String(shiftType || "").toLowerCase();
+
+    // Fallback: derive shift from schedule times if shiftType is missing
+    if (!shift && scheduleStart && scheduleEnd) {
+        if (scheduleStart === "22:00" && scheduleEnd === "06:00") {
+            shift = "night";
+        } else if (scheduleStart === "14:00" && scheduleEnd === "22:00") {
+            shift = "afternoon";
+        } else if (scheduleStart === "06:00" && scheduleEnd === "14:00") {
+            shift = "morning";
+        }
+    }
+
+    if (shift === "night") {
+        // Transfer regular hours to night differential for night shifts
+        adjusted.nightDifferentialHours = adjusted.regularHours || 0;
+        adjusted.regularHours = 0;
+    } else {
+        // Enforce 0 night differential for morning/afternoon shifts
+        adjusted.nightDifferentialHours = 0;
+    }
+    return adjusted;
+}
+
 // ══════════════════════════════════════════════
 // ── Punch In
 // ══════════════════════════════════════════════
@@ -55,7 +75,6 @@ exports.punchIn = async (user) => {
     const now = new Date();
     const timeString = getCurrentTimeString();
 
-    // Get active schedule
     const schedule = await getActiveSchedule(user.uid);
     if (!schedule) {
         throw new Error(
@@ -63,7 +82,6 @@ exports.punchIn = async (user) => {
         );
     }
 
-    // Deterministic doc ID prevents duplicate dailySummary per user per day
     const summaryDocId = `${user.uid}_${today}`;
     const summaryRef = db.collection("dailySummary").doc(summaryDocId);
 
@@ -73,18 +91,17 @@ exports.punchIn = async (user) => {
         if (existingDoc.exists) {
             const data = existingDoc.data();
             if (data.status === "In Progress") {
-                throw new Error(
-                    "You already have an active punch-in. Please punch out first."
-                );
+                throw new Error("You already have an active punch-in. Please punch out first.");
             }
             if (data.status === "Completed") {
-                throw new Error(
-                    "You have already completed your attendance for today."
-                );
+                throw new Error("You have already completed your attendance for today.");
             }
         }
 
         const attendanceRef = db.collection("attendance").doc();
+
+        // Safely determine shift classification from schedule object
+        const shiftType = schedule.shiftType || schedule.shift || "morning";
 
         const data = {
             userId: user.uid,
@@ -94,6 +111,7 @@ exports.punchIn = async (user) => {
             scheduleId: schedule.id,
             scheduleStart: schedule.shiftStart,
             scheduleEnd: schedule.shiftEnd,
+            shiftType, // Saved so punchOut knows how to route hours
             timeIn: timeString,
             timeOut: null,
             punchInTimestamp: now.toISOString(),
@@ -130,7 +148,6 @@ exports.punchOut = async (user) => {
     const now = new Date();
     const timeString = getCurrentTimeString();
 
-    // Find the in-progress summary (may be from a previous day for overnight shifts)
     const snap = await db
         .collection("dailySummary")
         .where("userId", "==", user.uid)
@@ -146,8 +163,8 @@ exports.punchOut = async (user) => {
     const summaryData = summaryDoc.data();
     const summaryRef = summaryDoc.ref;
 
-    // Compute attendance metrics on the backend
-    const metrics = computeMetrics({
+    // Calculate raw metrics from utility code
+    const rawMetrics = computeMetrics({
         punchInTimestamp: summaryData.punchInTimestamp,
         punchOutTimestamp: now.toISOString(),
         scheduleStart: summaryData.scheduleStart,
@@ -155,15 +172,17 @@ exports.punchOut = async (user) => {
         date: summaryData.date,
     });
 
+    // Reallocate hours using our rule function
+    const allocatedMetrics = applyShiftAllocation(rawMetrics, summaryData.shiftType, summaryData.scheduleStart, summaryData.scheduleEnd);
+
     const updateData = {
         timeOut: timeString,
         punchOutTimestamp: now.toISOString(),
-        ...metrics,
+        ...allocatedMetrics,
         status: "Completed",
         updatedAt: FieldValue.serverTimestamp(),
     };
 
-    // Transaction ensures atomicity: verify still in-progress, then update
     await db.runTransaction(async (t) => {
         const freshDoc = await t.get(summaryRef);
         if (!freshDoc.exists || freshDoc.data().status !== "In Progress") {
@@ -177,7 +196,7 @@ exports.punchOut = async (user) => {
             userId: user.uid,
             type: "OUT",
             timestamp: now.toISOString(),
-            date: summaryData.date, // Original shift date, not today
+            date: summaryData.date,
         });
     });
 
@@ -197,7 +216,6 @@ exports.punchOut = async (user) => {
 exports.getToday = async (user) => {
     const today = getTodayDate();
 
-    // 1. Check for any in-progress summary (handles overnight shifts)
     const inProgressSnap = await db
         .collection("dailySummary")
         .where("userId", "==", user.uid)
@@ -213,20 +231,16 @@ exports.getToday = async (user) => {
         };
     }
 
-    // 2. Check for today's completed summary
     const summaryDocId = `${user.uid}_${today}`;
     const summaryDoc = await db
         .collection("dailySummary")
         .doc(summaryDocId)
         .get();
 
-    // 3. Also fetch active schedule for display on the dashboard
     const schedule = await getActiveSchedule(user.uid);
 
     return {
-        summary: summaryDoc.exists
-            ? { id: summaryDoc.id, ...summaryDoc.data() }
-            : null,
+        summary: summaryDoc.exists ? { id: summaryDoc.id, ...summaryDoc.data() } : null,
         schedule: schedule || null,
     };
 };
@@ -259,12 +273,10 @@ exports.adminEditAttendance = async (summaryId, { timeIn, timeOut }) => {
 
     const data = summaryDoc.data();
 
-    // Build full ISO timestamps from the date + time strings
     const punchInTimestamp = new Date(`${data.date}T${timeIn}:00`).toISOString();
     let punchOutTimestamp;
 
     if (timeOut) {
-        // Handle overnight: if timeOut < timeIn, assume next day
         const outDate = new Date(`${data.date}T${timeOut}:00`);
         const inDate = new Date(`${data.date}T${timeIn}:00`);
         if (outDate <= inDate) {
@@ -279,9 +291,8 @@ exports.adminEditAttendance = async (summaryId, { timeIn, timeOut }) => {
         updatedAt: FieldValue.serverTimestamp(),
     };
 
-    // Only recalculate metrics if we have both punch in and out
     if (timeOut && punchOutTimestamp) {
-        const metrics = computeMetrics({
+        const rawMetrics = computeMetrics({
             punchInTimestamp,
             punchOutTimestamp,
             scheduleStart: data.scheduleStart,
@@ -289,9 +300,12 @@ exports.adminEditAttendance = async (summaryId, { timeIn, timeOut }) => {
             date: data.date,
         });
 
+        // Reallocate hours based on shift rules during administrative overrides
+        const allocatedMetrics = applyShiftAllocation(rawMetrics, data.shiftType, data.scheduleStart, data.scheduleEnd);
+
         updateData.timeOut = timeOut;
         updateData.punchOutTimestamp = punchOutTimestamp;
-        Object.assign(updateData, metrics);
+        Object.assign(updateData, allocatedMetrics);
         updateData.status = "Completed";
     }
 
