@@ -144,7 +144,7 @@ export default function Register() {
               />
             </div>
 
-            <div>
+            {/* <div>
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                 Role (For Demo)
               </label>
@@ -157,7 +157,7 @@ export default function Register() {
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
               </select>
-            </div>
+            </div> */}
 
             <div className="pt-2">
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
