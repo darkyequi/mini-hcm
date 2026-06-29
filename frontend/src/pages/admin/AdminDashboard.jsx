@@ -56,6 +56,10 @@ export default function AdminDashboard() {
               </h3>
               <ul className="space-y-3">
                 <li className="flex justify-between">
+                  <span className="text-zinc-500">Name:</span>
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate ml-2" title={userData?.firstName}>{userData?.firstName} {userData?.lastName}</span>
+                </li>
+                <li className="flex justify-between">
                   <span className="text-zinc-500">Email:</span>
                   <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate ml-2" title={userData?.email}>{userData?.email}</span>
                 </li>

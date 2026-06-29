@@ -52,6 +52,64 @@ function formatClockTime(date) {
   });
 }
 
+function getShiftLabel(start, end) {
+  if (start === "06:00" && end === "14:00") return "Morning";
+  if (start === "14:00" && end === "22:00") return "Afternoon";
+  if (start === "22:00" && end === "06:00") return "Night";
+  return `${start}–${end}`;
+}
+
+/**
+ * Applies the shift allocation rule on a record:
+ * - Morning/Afternoon shift → hours go to regularHours, nightDifferentialHours = 0
+ * - Night shift → hours go to nightDifferentialHours, regularHours = 0
+ */
+function allocateHours(record) {
+  const shift = getShiftLabel(record.scheduleStart, record.scheduleEnd);
+  const basicHours = Math.max(record.regularHours || 0, record.nightDifferentialHours || 0);
+
+  if (shift === "Night") {
+    return {
+      regularHours: 0,
+      nightDifferentialHours: basicHours,
+    };
+  }
+  return {
+    regularHours: basicHours,
+    nightDifferentialHours: 0,
+  };
+}
+
+/** Returns [startDate, endDate] as "YYYY-MM-DD" for the given period */
+function getDateRange(period) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+  const day = now.getDay();
+
+  const fmt = (dt) =>
+    `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+
+  switch (period) {
+    case "today":
+      return [fmt(now), fmt(now)];
+    case "week": {
+      const monday = new Date(y, m, d - ((day + 6) % 7));
+      const sunday = new Date(y, m, d + (7 - day) % 7);
+      return [fmt(monday), fmt(sunday)];
+    }
+    case "month":
+      return [fmt(new Date(y, m, 1)), fmt(new Date(y, m + 1, 0))];
+    case "year":
+      return [fmt(new Date(y, 0, 1)), fmt(new Date(y, 11, 31))];
+    case "all":
+      return ["1970-01-01", "2099-12-31"];
+    default:
+      return [fmt(now), fmt(now)];
+  }
+}
+
 const ROWS_PER_PAGE = 10;
 
 // ══════════════════════════════════════════════
@@ -159,6 +217,9 @@ export default function UserDashboard() {
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [page, setPage] = useState(1);
+
+  // Metric period filter
+  const [metricPeriod, setMetricPeriod] = useState("today");
 
   // ── Live Clock ──
   useEffect(() => {
@@ -340,6 +401,29 @@ export default function UserDashboard() {
   useEffect(() => {
     setPage(1);
   }, [filterFrom, filterTo]);
+
+  // ── Period-filtered metric aggregation ──
+  const periodMetrics = useMemo(() => {
+    const [start, end] = getDateRange(metricPeriod);
+    const filtered = history.filter((r) => r.date >= start && r.date <= end);
+    return {
+      regularHours: filtered.reduce((s, r) => s + allocateHours(r).regularHours, 0),
+      overtimeHours: filtered.reduce((s, r) => s + (r.overtimeHours || 0), 0),
+      nightDifferentialHours: filtered.reduce((s, r) => s + allocateHours(r).nightDifferentialHours, 0),
+      lateMinutes: filtered.reduce((s, r) => s + (r.lateMinutes || 0), 0),
+      undertimeMinutes: filtered.reduce((s, r) => s + (r.undertimeMinutes || 0), 0),
+      totalWorkedHours: filtered.reduce((s, r) => s + (r.totalWorkedHours || 0), 0),
+      count: filtered.length,
+    };
+  }, [history, metricPeriod]);
+
+  const metricPeriods = [
+    { key: "today", label: "Today" },
+    { key: "week", label: "This Week" },
+    { key: "month", label: "This Month" },
+    { key: "year", label: "This Year" },
+    { key: "all", label: "All" },
+  ];
 
   // ── Sortable Header Helper ──
   const SortHeader = ({ field, children, className = "" }) => (
@@ -529,18 +613,6 @@ export default function UserDashboard() {
                   {userData?.email}
                 </span>
               </li>
-              <li className="flex justify-between">
-                <span className="text-zinc-500">Time Zone:</span>
-                <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                  {userData?.timeZone}
-                </span>
-              </li>
-              <li className="flex justify-between">
-                <span className="text-zinc-500">Role:</span>
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                  {userData?.role}
-                </span>
-              </li>
             </ul>
 
             {/* Today's Status */}
@@ -570,15 +642,32 @@ export default function UserDashboard() {
           </div>
         </div>
 
-        {/* ── Today's Metrics ── */}
+        {/* ── Attendance Metrics ── */}
         <div className="glass-card p-6 mb-6">
-          <h3 className="font-semibold text-lg mb-4 text-zinc-800 dark:text-zinc-200">
-            Today's Attendance Metrics
-          </h3>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+            <h3 className="font-semibold text-lg text-zinc-800 dark:text-zinc-200">
+              Attendance Metrics
+            </h3>
+            <div className="flex flex-wrap gap-1.5">
+              {metricPeriods.map((p) => (
+                <button
+                  key={p.key}
+                  onClick={() => setMetricPeriod(p.key)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                    metricPeriod === p.key
+                      ? "bg-primary text-white shadow-sm"
+                      : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <MetricCard
               label="Regular"
-              value={todaySummary?.regularHours?.toFixed(2) ?? "0.00"}
+              value={periodMetrics.regularHours.toFixed(2)}
               unit="hrs"
               color="bg-blue-100 dark:bg-blue-900/30"
               bgColor="bg-blue-50/50 dark:bg-blue-950/20"
@@ -590,7 +679,7 @@ export default function UserDashboard() {
             />
             <MetricCard
               label="Overtime"
-              value={todaySummary?.overtimeHours?.toFixed(2) ?? "0.00"}
+              value={periodMetrics.overtimeHours.toFixed(2)}
               unit="hrs"
               color="bg-orange-100 dark:bg-orange-900/30"
               bgColor="bg-orange-50/50 dark:bg-orange-950/20"
@@ -602,7 +691,7 @@ export default function UserDashboard() {
             />
             <MetricCard
               label="Night Diff"
-              value={todaySummary?.nightDifferentialHours?.toFixed(2) ?? "0.00"}
+              value={periodMetrics.nightDifferentialHours.toFixed(2)}
               unit="hrs"
               color="bg-indigo-100 dark:bg-indigo-900/30"
               bgColor="bg-indigo-50/50 dark:bg-indigo-950/20"
@@ -614,7 +703,7 @@ export default function UserDashboard() {
             />
             <MetricCard
               label="Late"
-              value={todaySummary?.lateMinutes ?? 0}
+              value={periodMetrics.lateMinutes}
               unit="min"
               color="bg-red-100 dark:bg-red-900/30"
               bgColor="bg-red-50/50 dark:bg-red-950/20"
@@ -626,7 +715,7 @@ export default function UserDashboard() {
             />
             <MetricCard
               label="Undertime"
-              value={todaySummary?.undertimeMinutes ?? 0}
+              value={periodMetrics.undertimeMinutes}
               unit="min"
               color="bg-rose-100 dark:bg-rose-900/30"
               bgColor="bg-rose-50/50 dark:bg-rose-950/20"
@@ -638,7 +727,7 @@ export default function UserDashboard() {
             />
             <MetricCard
               label="Total Worked"
-              value={todaySummary?.totalWorkedHours?.toFixed(2) ?? "0.00"}
+              value={periodMetrics.totalWorkedHours.toFixed(2)}
               unit="hrs"
               color="bg-emerald-100 dark:bg-emerald-900/30"
               bgColor="bg-emerald-50/50 dark:bg-emerald-950/20"
@@ -657,153 +746,215 @@ export default function UserDashboard() {
           <div className="p-4 md:p-6 border-b border-zinc-200 dark:border-zinc-700/50">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <h3 className="font-semibold text-lg text-zinc-800 dark:text-zinc-200">
-                Attendance History
+                Daily Summary Report
               </h3>
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-zinc-500 dark:text-zinc-400">From:</label>
-                  <input
-                    type="date"
-                    value={filterFrom}
-                    onChange={(e) => setFilterFrom(e.target.value)}
-                    className="input-field text-sm py-1.5! px-3! w-auto!"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-zinc-500 dark:text-zinc-400">To:</label>
-                  <input
-                    type="date"
-                    value={filterTo}
-                    onChange={(e) => setFilterTo(e.target.value)}
-                    className="input-field text-sm py-1.5! px-3! w-auto!"
-                  />
-                </div>
-                {(filterFrom || filterTo) && (
-                  <button
-                    onClick={clearFilters}
-                    className="text-xs text-primary hover:text-primary-hover font-medium transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
             </div>
           </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead>
-                <tr className="border-b border-zinc-200 dark:border-zinc-700/50 bg-zinc-50/80 dark:bg-zinc-900/50">
-                  <SortHeader field="date">Date</SortHeader>
-                  <SortHeader field="timeIn">Time In</SortHeader>
-                  <SortHeader field="timeOut">Time Out</SortHeader>
-                  <SortHeader field="regularHours">Regular</SortHeader>
-                  <SortHeader field="overtimeHours">OT</SortHeader>
-                  <SortHeader field="nightDifferentialHours">ND</SortHeader>
-                  <SortHeader field="lateMinutes">Late</SortHeader>
-                  <SortHeader field="undertimeMinutes">Undertime</SortHeader>
-                  <SortHeader field="status">Status</SortHeader>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                {historyLoading ? (
-                  <>
-                    <SkeletonRow />
-                    <SkeletonRow />
-                    <SkeletonRow />
-                  </>
-                ) : paginatedHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-16 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
-                          <svg className="w-8 h-8 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                          </svg>
-                        </div>
-                        <p className="text-zinc-500 dark:text-zinc-400 font-medium">
-                          {filterFrom || filterTo
-                            ? "No records match the selected date range."
-                            : "No attendance records yet."}
+          {/* Loading */}
+          {historyLoading ? (
+            <>
+              <table className="hidden lg:table w-full">
+                <tbody>
+                  <SkeletonRow />
+                  <SkeletonRow />
+                  <SkeletonRow />
+                </tbody>
+              </table>
+              <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-4 p-4 animate-pulse">
+                {Array.from({ length: 4 }).map((_, c) => (
+                  <div key={c} className="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-3">
+                    <div className="h-5 bg-zinc-200 dark:bg-zinc-700 rounded w-2/3" />
+                    <div className="h-4 bg-zinc-200 dark:bg-zinc-700 rounded w-1/2" />
+                    <div className="h-4 bg-zinc-200 dark:bg-zinc-700 rounded w-3/4" />
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : paginatedHistory.length === 0 ? (
+            <div className="p-16 text-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                  <svg className="w-8 h-8 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <p className="text-zinc-500 dark:text-zinc-400 font-medium">
+                  {filterFrom || filterTo
+                    ? "No records match the selected date range."
+                    : "No attendance records yet."}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* ── Desktop Table ── */}
+              <div className="hidden lg:block overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-700/50 bg-zinc-50/80 dark:bg-zinc-900/50">
+                      <SortHeader field="date">Date</SortHeader>
+                      <th className="px-4 py-3.5 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap text-left">Shift</th>
+                      <SortHeader field="timeIn">Time In</SortHeader>
+                      <SortHeader field="timeOut">Time Out</SortHeader>
+                      <SortHeader field="regularHours">Regular</SortHeader>
+                      <SortHeader field="overtimeHours">OT</SortHeader>
+                      <SortHeader field="nightDifferentialHours">ND</SortHeader>
+                      <SortHeader field="lateMinutes">Late</SortHeader>
+                      <SortHeader field="undertimeMinutes">Undertime</SortHeader>
+                      <SortHeader field="status">Status</SortHeader>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {paginatedHistory.map((record) => (
+                      <tr
+                        key={record.id}
+                        className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors"
+                      >
+                        <td className="px-4 py-3.5 font-medium text-zinc-900 dark:text-zinc-100 whitespace-nowrap">
+                          {formatDateLabel(record.date)}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                            {getShiftLabel(record.scheduleStart, record.scheduleEnd)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap font-mono text-xs">
+                          {formatTime12(record.timeIn)}
+                        </td>
+                        <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap font-mono text-xs">
+                          {record.timeOut ? formatTime12(record.timeOut) : "—"}
+                        </td>
+                        <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
+                          {allocateHours(record).regularHours.toFixed(2)} h
+                        </td>
+                        <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
+                          {record.overtimeHours?.toFixed(2) ?? "0.00"} h
+                        </td>
+                        <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
+                          {allocateHours(record).nightDifferentialHours.toFixed(2)} h
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className={`text-xs font-medium ${(record.lateMinutes || 0) > 0 ? "text-red-600 dark:text-red-400" : "text-zinc-500 dark:text-zinc-400"}`}>
+                            {record.lateMinutes ?? 0} min
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span className={`text-xs font-medium ${(record.undertimeMinutes || 0) > 0 ? "text-rose-600 dark:text-rose-400" : "text-zinc-500 dark:text-zinc-400"}`}>
+                            {record.undertimeMinutes ?? 0} min
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                              record.status === "Completed"
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
+                                : record.status === "In Progress"
+                                  ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+                                  : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                record.status === "Completed"
+                                  ? "bg-emerald-500"
+                                  : record.status === "In Progress"
+                                    ? "bg-amber-500 animate-pulse"
+                                    : "bg-zinc-400"
+                              }`}
+                            />
+                            {record.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ── Tablet/Mobile Cards ── */}
+              <div className="lg:hidden grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-zinc-50/30 dark:bg-zinc-900/10">
+                {paginatedHistory.map((record) => (
+                  <div
+                    key={record.id}
+                    className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-xs flex flex-col justify-between hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200"
+                  >
+                    {/* Card Header */}
+                    <div className="flex justify-between items-start mb-3 gap-2">
+                      <div>
+                        <h3 className="font-bold text-zinc-900 dark:text-zinc-100 text-base">{formatDateLabel(record.date)}</h3>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {getShiftLabel(record.scheduleStart, record.scheduleEnd)} Shift
                         </p>
                       </div>
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedHistory.map((record) => (
-                    <tr
-                      key={record.id}
-                      className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors"
-                    >
-                      <td className="px-4 py-3.5 font-medium text-zinc-900 dark:text-zinc-100 whitespace-nowrap">
-                        {formatDateLabel(record.date)}
-                      </td>
-                      <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap font-mono text-xs">
-                        {formatTime12(record.timeIn)}
-                      </td>
-                      <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap font-mono text-xs">
-                        {record.timeOut ? formatTime12(record.timeOut) : "—"}
-                      </td>
-                      <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                        {record.regularHours?.toFixed(2) ?? "0.00"} h
-                      </td>
-                      <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                        {record.overtimeHours?.toFixed(2) ?? "0.00"} h
-                      </td>
-                      <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                        {record.nightDifferentialHours?.toFixed(2) ?? "0.00"} h
-                      </td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span
-                          className={`text-xs font-medium ${
-                            (record.lateMinutes || 0) > 0
-                              ? "text-red-600 dark:text-red-400"
-                              : "text-zinc-500 dark:text-zinc-400"
-                          }`}
-                        >
-                          {record.lateMinutes ?? 0} min
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span
-                          className={`text-xs font-medium ${
-                            (record.undertimeMinutes || 0) > 0
-                              ? "text-rose-600 dark:text-rose-400"
-                              : "text-zinc-500 dark:text-zinc-400"
-                          }`}
-                        >
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        record.status === "Completed"
+                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
+                          : record.status === "In Progress"
+                            ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+                            : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          record.status === "Completed" ? "bg-emerald-500"
+                            : record.status === "In Progress" ? "bg-amber-500 animate-pulse"
+                            : "bg-zinc-400"
+                        }`} />
+                        {record.status}
+                      </span>
+                    </div>
+
+                    {/* Card Badges */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                        {getShiftLabel(record.scheduleStart, record.scheduleEnd)}
+                      </span>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium ${
+                        (record.lateMinutes || 0) > 0
+                          ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300"
+                          : "bg-zinc-50 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                      }`}>
+                        Late: {record.lateMinutes ?? 0}m
+                      </span>
+                    </div>
+
+                    {/* Card Info */}
+                    <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs border-t border-zinc-100 dark:border-zinc-800/80 pt-3 mb-4 text-zinc-600 dark:text-zinc-400">
+                      <div>
+                        <span className="block text-zinc-400 font-medium mb-0.5">Punch In:</span>
+                        <span className="font-mono">{formatTime12(record.timeIn)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-zinc-400 font-medium mb-0.5">Punch Out:</span>
+                        <span className="font-mono">{record.timeOut ? formatTime12(record.timeOut) : "—"}</span>
+                      </div>
+                      <div>
+                        <span className="block text-zinc-400 font-medium mb-0.5">Regular:</span>
+                        <span>{allocateHours(record).regularHours.toFixed(2)} h</span>
+                      </div>
+                      <div>
+                        <span className="block text-zinc-400 font-medium mb-0.5">Overtime:</span>
+                        <span>{record.overtimeHours?.toFixed(2) ?? "0.00"} h</span>
+                      </div>
+                      <div>
+                        <span className="block text-zinc-400 font-medium mb-0.5">Night Diff:</span>
+                        <span>{allocateHours(record).nightDifferentialHours.toFixed(2)} h</span>
+                      </div>
+                      <div>
+                        <span className="block text-zinc-400 font-medium mb-0.5">Undertime:</span>
+                        <span className={`${(record.undertimeMinutes || 0) > 0 ? "text-rose-600 dark:text-rose-400" : ""}`}>
                           {record.undertimeMinutes ?? 0} min
                         </span>
-                      </td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                            record.status === "Completed"
-                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
-                              : record.status === "In Progress"
-                                ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
-                                : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              record.status === "Completed"
-                                ? "bg-emerald-500"
-                                : record.status === "In Progress"
-                                  ? "bg-amber-500 animate-pulse"
-                                  : "bg-zinc-400"
-                            }`}
-                          />
-                          {record.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                      <div>
+                        <span className="block text-zinc-400 font-medium mb-0.5">Total Worked:</span>
+                        <span>{record.totalWorkedHours?.toFixed(2) ?? "0.00"} h</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           {/* Pagination Footer */}
           {!historyLoading && processedHistory.length > 0 && (

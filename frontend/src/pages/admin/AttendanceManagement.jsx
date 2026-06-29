@@ -48,6 +48,27 @@ function getShiftLabel(start, end) {
   return match ? match.name : `${start}–${end}`;
 }
 
+/**
+ * Applies the shift allocation rule on a record:
+ * - Morning/Afternoon shift → hours go to regularHours, nightDifferentialHours = 0
+ * - Night shift → hours go to nightDifferentialHours, regularHours = 0
+ */
+function allocateHours(record) {
+  const shift = getShiftLabel(record.scheduleStart, record.scheduleEnd);
+  const basicHours = Math.max(record.regularHours || 0, record.nightDifferentialHours || 0);
+
+  if (shift === "Night") {
+    return {
+      regularHours: 0,
+      nightDifferentialHours: basicHours,
+    };
+  }
+  return {
+    regularHours: basicHours,
+    nightDifferentialHours: 0,
+  };
+}
+
 /** Returns [startDate, endDate] as "YYYY-MM-DD" for the given period */
 function getDateRange(period) {
   const now = new Date();
@@ -368,7 +389,7 @@ function ViewAttendanceModal({ open, record, onClose }) {
           </div>
           <div>
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Regular Hours</span>
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5">{record.regularHours?.toFixed(2) ?? "0.00"} h</p>
+            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5">{allocateHours(record).regularHours.toFixed(2)} h</p>
           </div>
           <div>
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Overtime Hours</span>
@@ -388,7 +409,7 @@ function ViewAttendanceModal({ open, record, onClose }) {
           </div>
           <div>
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Night Diff Hours</span>
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5">{record.nightDifferentialHours?.toFixed(2) ?? "0.00"} h</p>
+            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5">{allocateHours(record).nightDifferentialHours.toFixed(2)} h</p>
           </div>
           <div>
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Status</span>
@@ -582,11 +603,11 @@ export default function AttendanceManagement() {
     const uniqueEmployees = new Set(records.map((r) => r.userId));
     return {
       present: uniqueEmployees.size,
-      regularHours: records.reduce((s, r) => s + (r.regularHours || 0), 0),
+      regularHours: records.reduce((s, r) => s + allocateHours(r).regularHours, 0),
       overtimeHours: records.reduce((s, r) => s + (r.overtimeHours || 0), 0),
       lateMinutes: records.reduce((s, r) => s + (r.lateMinutes || 0), 0),
       undertimeMinutes: records.reduce((s, r) => s + (r.undertimeMinutes || 0), 0),
-      nightDiffHours: records.reduce((s, r) => s + (r.nightDifferentialHours || 0), 0),
+      nightDiffHours: records.reduce((s, r) => s + allocateHours(r).nightDifferentialHours, 0),
     };
   }, [records]);
 
@@ -904,7 +925,7 @@ export default function AttendanceManagement() {
                           {record.timeOut ? formatTime12(record.timeOut) : "—"}
                         </td>
                         <td className="px-3 py-3 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                          {record.regularHours?.toFixed(2) ?? "0.00"} h
+                          {allocateHours(record).regularHours.toFixed(2)} h
                         </td>
                         <td className="px-3 py-3 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
                           {record.overtimeHours?.toFixed(2) ?? "0.00"} h
@@ -920,7 +941,7 @@ export default function AttendanceManagement() {
                           </span>
                         </td>
                         <td className="px-3 py-3 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                          {record.nightDifferentialHours?.toFixed(2) ?? "0.00"} h
+                          {allocateHours(record).nightDifferentialHours.toFixed(2)} h
                         </td>
                         <td className="px-3 py-3 whitespace-nowrap">
                           <span

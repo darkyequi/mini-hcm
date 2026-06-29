@@ -4,6 +4,39 @@ import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 
+// Get all supported IANA time zones, with a fallback in case
+// the browser doesn't support Intl.supportedValuesOf (e.g. older Safari).
+function getTimeZones() {
+  try {
+    if (typeof Intl.supportedValuesOf === "function") {
+      return Intl.supportedValuesOf("timeZone");
+    }
+  } catch (e) {
+    // fall through to fallback
+  }
+  return [
+    "UTC",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Anchorage",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Moscow",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Shanghai",
+    "Asia/Tokyo",
+    "Asia/Manila",
+    "Australia/Sydney",
+    "Pacific/Auckland",
+  ];
+}
+
+const TIME_ZONES = getTimeZones();
+
 export default function Register() {
   const [formData, setFormData] = useState({
     firstName: "",
@@ -134,14 +167,19 @@ export default function Register() {
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                 Time Zone
               </label>
-              <input
+              <select
                 name="timeZone"
-                type="text"
                 required
-                className="input-field"
+                className="input-field cursor-pointer"
                 value={formData.timeZone}
                 onChange={handleChange}
-              />
+              >
+                {TIME_ZONES.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* <div>

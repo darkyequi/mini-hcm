@@ -1,9 +1,9 @@
 const { FieldValue } = require("firebase-admin/firestore");
 const { admin, db } = require("../firebaseAdmin");
+
 const adminAuth = admin.auth();
 
-// Set up dates for the last 7 days (e.g., June 21 to June 27, 2026)
-// We will generate the dates dynamically based on current date
+// Generate past dates
 const generatePastDates = (days) => {
   const dates = [];
   for (let i = days; i > 0; i--) {
@@ -14,157 +14,195 @@ const generatePastDates = (days) => {
   return dates;
 };
 
-// Formatting helpers
 const formatDate = (date) => {
   const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 };
 
 const createTimestamp = (date, timeStr) => {
-  // timeStr is like "08:00" in UTC+8
-  const [hours, minutes] = timeStr.split(':');
+  const [hours, minutes] = timeStr.split(":").map(Number);
   const d = new Date(date.getTime());
-  // Set time in UTC+8 (subtract 8 hours for UTC)
-  d.setUTCHours(parseInt(hours) - 8, parseInt(minutes), 0, 0);
+  d.setUTCHours(hours - 8, minutes, 0, 0); // Assuming UTC+8 adjustment
   return d.toISOString();
 };
 
-const seedAttendance = async () => {
-  try {
-    // 1. Get UIDs for user1 and user
-    let user1Record, userRecord;
-    try {
-      user1Record = await adminAuth.getUserByEmail('user1@minihcm.com');
-      userRecord = await adminAuth.getUserByEmail('user@minihcm.com');
-    } catch (e) {
-      console.error("Error fetching users. Make sure you ran seedAccounts.js first.", e.message);
-      process.exit(1);
-    }
+const toMinutes = (time) => {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+};
 
-    const user1Id = user1Record.uid;
-    const userId = userRecord.uid;
+// Attendance scenarios (Morning: 06:00-14:00, Night: 22:00-06:00)
+const scenarios = [
+  { morning: { in: "06:00", out: "14:00" }, night: { in: "22:00", out: "06:00" } }, // Perfect
+  { morning: { in: "06:20", out: "14:00" }, night: { in: "22:20", out: "06:00" } }, // Late
+  { morning: { in: "06:00", out: "13:20" }, night: { in: "22:00", out: "05:20" } }, // Undertime
+  { morning: { in: "05:55", out: "15:15" }, night: { in: "21:55", out: "07:15" } }, // Overtime
+  { morning: { in: "06:15", out: "15:00" }, night: { in: "22:15", out: "07:00" } }, // Late + Overtime
+  { morning: { in: "06:30", out: "13:30" }, night: { in: "22:30", out: "05:30" } }, // Late + Undertime
+  { morning: { in: "05:58", out: "14:10" }, night: { in: "21:58", out: "06:10" } }  // Slight Overtime
+];
+
+async function seedAttendance() {
+  try {
+    const user1Auth = await adminAuth.getUserByEmail("user1@minihcm.com");
+    const user2Auth = await adminAuth.getUserByEmail("user@minihcm.com");
+
+    const user1Doc = await db.collection("users").doc(user1Auth.uid).get();
+    const user2Doc = await db.collection("users").doc(user2Auth.uid).get();
+
+    const user1 = user1Doc.data();
+    const user2 = user2Doc.data();
+
+    const employees = [
+      {
+        uid: user1Auth.uid,
+        ...user1,
+        scheduleStart: "06:00",
+        scheduleEnd: "14:00",
+        scheduleId: "morning_shift_seed",
+        shift: "morning"
+      },
+      {
+        uid: user2Auth.uid,
+        ...user2,
+        scheduleStart: "22:00",
+        scheduleEnd: "06:00",
+        scheduleId: "night_shift_seed",
+        shift: "night"
+      }
+    ];
 
     const dates = generatePastDates(7);
-    console.log(`Seeding attendance for 7 days...`);
-
     const batch = db.batch();
-    
-    dates.forEach(date => {
+
+    for (let i = 0; i < dates.length; i++) {
+      const date = dates[i];
       const dateStr = formatDate(date);
-      
-      // ==========================================
-      // USER 1: MORNING SHIFT (08:00 - 17:00)
-      // ==========================================
-      const u1PunchIn = createTimestamp(date, "07:55");
-      const u1PunchOut = createTimestamp(date, "17:05");
-      
-      // Attendance IN
-      const u1InRef = db.collection("attendance").doc();
-      batch.set(u1InRef, {
-        date: dateStr,
-        timestamp: u1PunchIn,
-        type: "IN",
-        userId: user1Id
-      });
+      const scenario = scenarios[i];
 
-      // Attendance OUT
-      const u1OutRef = db.collection("attendance").doc();
-      batch.set(u1OutRef, {
-        date: dateStr,
-        timestamp: u1PunchOut,
-        type: "OUT",
-        userId: user1Id
-      });
+      for (const emp of employees) {
+        const shift = emp.shift === "morning" ? scenario.morning : scenario.night;
 
-      // Daily Summary
-      const u1SummaryRef = db.collection("dailySummary").doc(`${user1Id}_${dateStr}`);
-      batch.set(u1SummaryRef, {
-        createdAt: FieldValue.serverTimestamp(),
-        date: dateStr,
-        lateMinutes: 0,
-        nightDifferentialHours: 0,
-        overtimeHours: 0.08,
-        punchInTimestamp: u1PunchIn,
-        punchOutTimestamp: u1PunchOut,
-        regularHours: 8,
-        scheduleEnd: "17:00",
-        scheduleId: "morning_shift_seed",
-        scheduleStart: "08:00",
-        status: "Completed",
-        timeIn: "07:55",
-        timeOut: "17:05",
-        totalWorkedHours: 8.08,
-        undertimeMinutes: 0,
-        updatedAt: FieldValue.serverTimestamp(),
-        userId: user1Id
-      });
+        let inTime = shift.in;
+        let outTime = shift.out;
 
-      // ==========================================
-      // USER: NIGHT SHIFT (22:00 - 07:00)
-      // ==========================================
-      // Note: For night shift, the Punch Out happens the next day. 
-      // But we record it under the schedule start date.
-      const u2PunchIn = createTimestamp(date, "21:55");
-      
-      const nextDay = new Date(date);
-      nextDay.setDate(nextDay.getDate() + 1);
-      const u2PunchOut = createTimestamp(nextDay, "07:05");
+        // Setup Timestamps properly handling dates
+        const punchIn = createTimestamp(date, inTime);
+        let punchOutDate = new Date(date);
 
-      // Attendance IN
-      const u2InRef = db.collection("attendance").doc();
-      batch.set(u2InRef, {
-        date: dateStr,
-        timestamp: u2PunchIn,
-        type: "IN",
-        userId: userId
-      });
+        // If night shift and outTime crossed midnight (e.g. 05:00, 06:00, 07:00), push date forward
+        if (emp.shift === "night" && toMinutes(outTime) < toMinutes(inTime)) {
+          punchOutDate.setDate(punchOutDate.getDate() + 1);
+        }
+        const punchOut = createTimestamp(punchOutDate, outTime);
 
-      // Attendance OUT (Usually recorded on the next day's date string if we just check local time, 
-      // but for logical grouping, it's tied to the shift date or the actual date.
-      // We will use the actual date string for the out punch to mimic real life)
-      const nextDateStr = formatDate(nextDay);
-      const u2OutRef = db.collection("attendance").doc();
-      batch.set(u2OutRef, {
-        date: nextDateStr,
-        timestamp: u2PunchOut,
-        type: "OUT",
-        userId: userId
-      });
+        // Normalize minutes to an absolute absolute timeline mapping
+        let schStartMin = toMinutes(emp.scheduleStart);
+        let schEndMin = toMinutes(emp.scheduleEnd);
+        if (schEndMin < schStartMin) schEndMin += 1440; // Handles 22:00 to 06:00 (+1440)
 
-      // Daily Summary (Tied to the shift start date)
-      const u2SummaryRef = db.collection("dailySummary").doc(`${userId}_${dateStr}`);
-      batch.set(u2SummaryRef, {
-        createdAt: FieldValue.serverTimestamp(),
-        date: dateStr,
-        lateMinutes: 0,
-        nightDifferentialHours: 7, // Typically 10pm to 6am = 8 hours - 1 hour break = 7
-        overtimeHours: 0.08,
-        punchInTimestamp: u2PunchIn,
-        punchOutTimestamp: u2PunchOut,
-        regularHours: 8,
-        scheduleEnd: "07:00",
-        scheduleId: "night_shift_seed",
-        scheduleStart: "22:00",
-        status: "Completed",
-        timeIn: "21:55",
-        timeOut: "07:05",
-        totalWorkedHours: 8.08,
-        undertimeMinutes: 0,
-        updatedAt: FieldValue.serverTimestamp(),
-        userId: userId
-      });
-    });
+        let actInMin = toMinutes(inTime);
+        let actOutMin = toMinutes(outTime);
+
+        // Adjust actual times relative to the timeline
+        if (emp.shift === "night") {
+          // If clocked in early morning next day (e.g., 00:15 vs 22:00 schedule)
+          if (actInMin < 600) actInMin += 1440;
+          // If clocked out next morning (e.g., 06:00 vs 22:00 schedule)
+          if (actOutMin < actInMin || actOutMin < 600) actOutMin += 1440;
+        }
+
+        // Metrics calculations
+        const lateMinutes = Math.max(actInMin - schStartMin, 0);
+        const undertimeMinutes = Math.max(schEndMin - actOutMin, 0);
+        const overtimeMinutes = Math.max(actOutMin - schEndMin, 0);
+
+        const totalWorkedMinutes = Math.max(actOutMin - actInMin, 0);
+        const totalWorkedHours = Number((totalWorkedMinutes / 60).toFixed(2));
+
+        // Calculate dynamic regular hours capped at 8 max
+        const baseScheduledMinutes = schEndMin - schStartMin; // 480 mins (8 hours)
+        const lossMinutes = lateMinutes + undertimeMinutes;
+        const regularHours = Number((Math.max(baseScheduledMinutes - lossMinutes, 0) / 60).toFixed(2));
+
+        // Night Differential (22:00 to 06:00 window)
+        let nightDifferentialHours = 0;
+        if (emp.shift === "night") {
+          // ND is earned only during the scheduled ND window, excluding late/undertime
+          nightDifferentialHours = regularHours;
+        }
+
+        const userName = `${emp.firstName} ${emp.lastName}`;
+
+        // Attendance IN
+        batch.set(db.collection("attendance").doc(), {
+          userId: emp.uid,
+          userName,
+          firstName: emp.firstName,
+          lastName: emp.lastName,
+          email: emp.email,
+          date: dateStr,
+          timestamp: punchIn,
+          type: "IN"
+        });
+
+        // Attendance OUT
+        batch.set(db.collection("attendance").doc(), {
+          userId: emp.uid,
+          userName,
+          firstName: emp.firstName,
+          lastName: emp.lastName,
+          email: emp.email,
+          date: emp.shift === "night" ? formatDate(punchOutDate) : dateStr,
+          timestamp: punchOut,
+          type: "OUT"
+        });
+
+        // Daily Summary
+        // Daily Summary
+        batch.set(
+          db.collection("dailySummary").doc(`${emp.uid}_${dateStr}`),
+          {
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            userId: emp.uid,
+            userName,
+            email: emp.email,
+            date: dateStr,
+            scheduleId: emp.scheduleId,
+            scheduleStart: emp.scheduleStart,
+            scheduleEnd: emp.scheduleEnd,
+            punchInTimestamp: punchIn,
+            punchOutTimestamp: punchOut,
+            timeIn: inTime,
+            timeOut: outTime,
+            shiftType: emp.shift,
+            regularHours,
+            totalWorkedHours,
+            lateMinutes,
+            undertimeMinutes,
+            overtimeHours: Number((overtimeMinutes / 60).toFixed(2)),
+            nightDifferentialHours,
+            status: "Completed"
+          }
+        );
+      }
+    }
 
     await batch.commit();
-    console.log("Successfully seeded 1 week of attendance and daily summaries!");
-    process.exit(0);
 
-  } catch (error) {
-    console.error("Failed to seed attendance data:", error);
+    console.log("===================================");
+    console.log("Attendance seeded successfully!");
+    console.log("7 days of records created.");
+    console.log("===================================");
+
+    process.exit(0);
+  } catch (err) {
+    console.error(err);
     process.exit(1);
   }
-};
+}
 
 seedAttendance();

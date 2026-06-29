@@ -464,7 +464,9 @@ export default function ScheduleManagement() {
     const fetchUsers = async () => {
       try {
         const snap = await getDocs(collection(db, "users"));
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((u) => u.role !== "admin");
         setUsers(list);
       } catch (err) {
         console.error("Error fetching users:", err);
@@ -484,10 +486,10 @@ export default function ScheduleManagement() {
         snapshot.docs.forEach((d) => {
           const data = d.data();
           const status = getStatusFromEndDate(data.endDate);
-          
+
           if (status === "Expired") {
             // Automatically delete expired schedules
-            deleteDoc(doc(db, "schedules", d.id)).catch(err => 
+            deleteDoc(doc(db, "schedules", d.id)).catch(err =>
               console.error("Error auto-deleting expired schedule:", err)
             );
           } else {
@@ -652,7 +654,7 @@ export default function ScheduleManagement() {
 
         {/* Schedule Display List Frame */}
         <div className="glass-card overflow-hidden">
-          
+
           {loading ? (
             <SkeletonLoader />
           ) : filteredSchedules.length === 0 ? (
@@ -708,11 +710,10 @@ export default function ScheduleManagement() {
                           </span>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                            s.shiftName === "Morning" ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :
-                            s.shiftName === "Afternoon" ? "bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300" :
-                            "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300"
-                          }`}>
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${s.shiftName === "Morning" ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :
+                              s.shiftName === "Afternoon" ? "bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300" :
+                                "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300"
+                            }`}>
                             {s.shiftName}
                           </span>
                         </td>
@@ -721,10 +722,9 @@ export default function ScheduleManagement() {
                         <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{s.startDate}</td>
                         <td className="px-4 py-3.5 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{s.endDate}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                            s.status === "Active" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" :
-                            "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                          }`}>
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${s.status === "Active" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" :
+                              "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                            }`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${s.status === "Active" ? "bg-emerald-500" : "bg-zinc-400"}`} />
                             {s.status}
                           </span>
@@ -749,8 +749,8 @@ export default function ScheduleManagement() {
               {/* Tablet/Mobile Device View ── Cards Grid */}
               <div className="xl:hidden grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-zinc-50/30 dark:bg-zinc-900/10">
                 {paginatedSchedules.map((s) => (
-                  <div 
-                    key={s.id} 
+                  <div
+                    key={s.id}
                     className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-xs flex flex-col justify-between hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200"
                   >
                     <div>
@@ -760,10 +760,9 @@ export default function ScheduleManagement() {
                           <h3 className="font-bold text-zinc-900 dark:text-zinc-100 text-base">{s.userName}</h3>
                           <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate max-w-50 sm:max-w-xs">{s.email}</p>
                         </div>
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                          s.status === "Active" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" :
-                          "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                        }`}>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${s.status === "Active" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300" :
+                            "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                          }`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${s.status === "Active" ? "bg-emerald-500" : "bg-zinc-400"}`} />
                           {s.status}
                         </span>
@@ -771,11 +770,10 @@ export default function ScheduleManagement() {
 
                       {/* Card Technical Badges */}
                       <div className="flex flex-wrap gap-2 mb-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium ${
-                          s.shiftName === "Morning" ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :
-                          s.shiftName === "Afternoon" ? "bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300" :
-                          "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300"
-                        }`}>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium ${s.shiftName === "Morning" ? "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300" :
+                            s.shiftName === "Afternoon" ? "bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300" :
+                              "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-300"
+                          }`}>
                           {s.shiftName} Shift
                         </span>
                         <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
@@ -845,11 +843,10 @@ export default function ScheduleManagement() {
                       <button
                         key={pageNum}
                         onClick={() => setCurrentPage(pageNum)}
-                        className={`w-8 h-8 rounded-lg text-xs font-medium border transition-all ${
-                          currentPage === pageNum
+                        className={`w-8 h-8 rounded-lg text-xs font-medium border transition-all ${currentPage === pageNum
                             ? "bg-primary border-primary text-white shadow-sm"
                             : "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                        }`}
+                          }`}
                       >
                         {pageNum}
                       </button>
