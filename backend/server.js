@@ -14,6 +14,11 @@ app.use(express.json());
 // ── Routes ──
 app.use("/api/attendance", attendanceRoutes);
 
-app.listen(5000, () => {
-    console.log("Server running on port 5000");
-});
+// Only run a local listener when executed directly (not when imported by Vercel)
+if (require.main === module) {
+    app.listen(5000, () => {
+        console.log("Server running on port 5000");
+    });
+}
+
+module.exports = app;
