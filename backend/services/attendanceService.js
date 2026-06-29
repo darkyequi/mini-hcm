@@ -6,18 +6,32 @@ const { computeMetrics } = require("../utils/attendanceCalculator");
 // ── Helpers
 // ══════════════════════════════════════════════
 
+const TIMEZONE = "Asia/Manila";
+
 function getTodayDate() {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(now);
+    const year = parts.find((p) => p.type === "year").value;
+    const month = parts.find((p) => p.type === "month").value;
+    const day = parts.find((p) => p.type === "day").value;
     return `${year}-${month}-${day}`;
 }
 
 function getCurrentTimeString() {
     const now = new Date();
-    const hours = String(now.getHours()).padStart(2, "0");
-    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: TIMEZONE,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).formatToParts(now);
+    const hours = parts.find((p) => p.type === "hour").value;
+    const minutes = parts.find((p) => p.type === "minute").value;
     return `${hours}:${minutes}`;
 }
 
