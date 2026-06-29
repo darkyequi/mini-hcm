@@ -9,6 +9,7 @@ import Register from "./pages/auth/Register";
 import UserDashboard from "./pages/user/Dashboard";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import ScheduleManagement from "./pages/admin/ScheduleManagement";
+import AttendanceManagement from "./pages/admin/AttendanceManagement";
 
 // Components
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -73,6 +74,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute requiredRole="admin">
             <ScheduleManagement />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/admin/attendance-management"
+        element={
+          <ProtectedRoute requiredRole="admin">
+            <AttendanceManagement />
           </ProtectedRoute>
         }
       />
