@@ -237,6 +237,7 @@ exports.punchOut = async (user) => {
 
 exports.getToday = async (user) => {
     const today = getTodayDate();
+    const schedule = await getActiveSchedule(user.uid);
 
     const inProgressSnap = await db
         .collection("dailySummary")
@@ -249,7 +250,7 @@ exports.getToday = async (user) => {
         const doc = inProgressSnap.docs[0];
         return {
             summary: { id: doc.id, ...doc.data() },
-            schedule: null,
+            schedule: schedule || null,
         };
     }
 
@@ -258,8 +259,6 @@ exports.getToday = async (user) => {
         .collection("dailySummary")
         .doc(summaryDocId)
         .get();
-
-    const schedule = await getActiveSchedule(user.uid);
 
     return {
         summary: summaryDoc.exists ? { id: summaryDoc.id, ...summaryDoc.data() } : null,
