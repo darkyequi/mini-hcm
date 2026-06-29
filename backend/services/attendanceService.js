@@ -6,32 +6,54 @@ const { computeMetrics } = require("../utils/attendanceCalculator");
 // ── Helpers
 // ══════════════════════════════════════════════
 
+const TIMEZONE = "Asia/Manila";
+
 function getTodayDate() {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(now);
+    const year = parts.find((p) => p.type === "year").value;
+    const month = parts.find((p) => p.type === "month").value;
+    const day = parts.find((p) => p.type === "day").value;
     return `${year}-${month}-${day}`;
 }
 
 function getCurrentTimeString() {
     const now = new Date();
-    const hours = String(now.getHours()).padStart(2, "0");
-    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: TIMEZONE,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+    }).formatToParts(now);
+    const hours = parts.find((p) => p.type === "hour").value;
+    const minutes = parts.find((p) => p.type === "minute").value;
     return `${hours}:${minutes}`;
 }
 
 async function getActiveSchedule(userId) {
     const today = getTodayDate();
+    console.log(`[getActiveSchedule] userId=${userId}, today=${today}`);
     const snap = await db
         .collection("schedules")
         .where("userId", "==", userId)
         .get();
 
+    console.log(`[getActiveSchedule] Found ${snap.docs.length} schedule(s) for user`);
+    snap.docs.forEach((d) => {
+        const data = d.data();
+        console.log(`  schedule id=${d.id}, startDate=${data.startDate}, endDate=${data.endDate}`);
+    });
+
     const schedule = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .find((s) => s.startDate <= today && s.endDate >= today);
 
+    console.log(`[getActiveSchedule] Active schedule: ${schedule ? schedule.id : "NONE"}`);
     return schedule || null;
 }
 
