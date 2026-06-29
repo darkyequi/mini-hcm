@@ -91,7 +91,7 @@ async function seedAttendance() {
         // Setup Timestamps properly handling dates
         const punchIn = createTimestamp(date, inTime);
         let punchOutDate = new Date(date);
-        
+
         // If night shift and outTime crossed midnight (e.g. 05:00, 06:00, 07:00), push date forward
         if (emp.shift === "night" && toMinutes(outTime) < toMinutes(inTime)) {
           punchOutDate.setDate(punchOutDate.getDate() + 1);
@@ -109,7 +109,7 @@ async function seedAttendance() {
         // Adjust actual times relative to the timeline
         if (emp.shift === "night") {
           // If clocked in early morning next day (e.g., 00:15 vs 22:00 schedule)
-          if (actInMin < 600) actInMin += 1440; 
+          if (actInMin < 600) actInMin += 1440;
           // If clocked out next morning (e.g., 06:00 vs 22:00 schedule)
           if (actOutMin < actInMin || actOutMin < 600) actOutMin += 1440;
         }
@@ -131,7 +131,7 @@ async function seedAttendance() {
         let nightDifferentialHours = 0;
         if (emp.shift === "night") {
           // ND is earned only during the scheduled ND window, excluding late/undertime
-          nightDifferentialHours = regularHours; 
+          nightDifferentialHours = regularHours;
         }
 
         const userName = `${emp.firstName} ${emp.lastName}`;
@@ -161,6 +161,7 @@ async function seedAttendance() {
         });
 
         // Daily Summary
+        // Daily Summary
         batch.set(
           db.collection("dailySummary").doc(`${emp.uid}_${dateStr}`),
           {
@@ -168,8 +169,6 @@ async function seedAttendance() {
             updatedAt: FieldValue.serverTimestamp(),
             userId: emp.uid,
             userName,
-            firstName: emp.firstName,
-            lastName: emp.lastName,
             email: emp.email,
             date: dateStr,
             scheduleId: emp.scheduleId,
@@ -179,6 +178,7 @@ async function seedAttendance() {
             punchOutTimestamp: punchOut,
             timeIn: inTime,
             timeOut: outTime,
+            shiftType: emp.shift,
             regularHours,
             totalWorkedHours,
             lateMinutes,
