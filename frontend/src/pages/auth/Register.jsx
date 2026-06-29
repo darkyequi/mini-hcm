@@ -61,8 +61,17 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    const passwordRegex = /^(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
+
+    if (!passwordRegex.test(formData.password)) {
+      return setError(
+        "Password must be at least 8 characters long and contain at least one number and one special character."
+      );
+    }
+
     if (formData.password !== formData.passwordConfirm) {
-      return setError("Passwords do not match");
+      return setError("Passwords do not match.");
     }
 
     setError("");
